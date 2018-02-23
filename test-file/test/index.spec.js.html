@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <base data-ice="baseUrl" href="../../">
+  <title data-ice="title">test/index.spec.js | API Document</title>
+  <link type="text/css" rel="stylesheet" href="css/style.css">
+  <link type="text/css" rel="stylesheet" href="css/prettify-tomorrow.css">
+  <script src="script/prettify/prettify.js"></script>
+  
+  
+  <script src="script/manual.js"></script>
+</head>
+<body class="layout-container" data-ice="rootContainer">
+
+<header>
+  <a href="./">Home</a>
+  
+  <a href="identifiers.html">Reference</a>
+  <a href="source.html">Source</a>
+  <a href="test.html" data-ice="testLink">Test</a>
+  <a data-ice="repoURL" href="https://github.com/DopplerLabs/serverless-plugin-deploy-environment" class="repo-url-github">Repository</a>
+  <div class="search-box">
+  <span>
+    <img src="./image/search.png">
+    <span class="search-input-edge"></span><input class="search-input"><span class="search-input-edge"></span>
+  </span>
+    <ul class="search-result"></ul>
+  </div>
+</header>
+
+<nav class="navigation" data-ice="nav"><div>
+  <ul>
+    
+  <li data-ice="doc"><span data-ice="kind" class="kind-class">C</span><span data-ice="name"><span><a href="class/src/index.js~ServerlessDeployEnvironment.html">ServerlessDeployEnvironment</a></span></span></li>
+<li data-ice="doc"><span data-ice="kind" class="kind-function">F</span><span data-ice="name"><span><a href="function/index.html#static-function-_fetchCred">_fetchCred</a></span></span></li>
+<li data-ice="doc"><span data-ice="kind" class="kind-variable">V</span><span data-ice="name"><span><a href="variable/index.html#static-variable-CREDSTASH_PREFIX">CREDSTASH_PREFIX</a></span></span></li>
+</ul>
+</div>
+</nav>
+
+<div class="content" data-ice="content"><h1 data-ice="title">test/index.spec.js</h1>
+<pre class="source-code line-number raw-source-code"><code class="prettyprint linenums" data-ice="content">import sinon from &apos;sinon&apos;
+import Serverless from &apos;serverless&apos;
+import test from &apos;ava&apos;
+import _ from &apos;lodash&apos;
+import childProcess from &apos;child_process&apos;
+import ServerlessDeployEnvironment from &apos;../src&apos;
+
+function initServerlessPlugin(sls) {
+  sls.service.provider.name = &apos;aws&apos;
+  sls.pluginManager.addPlugin(ServerlessDeployEnvironment)
+  sls.init()
+
+  return sls.pluginManager.plugins[0]
+}
+
+test.beforeEach(t =&gt; {
+  t.context.sandbox = sinon.sandbox.create()
+})
+
+test.afterEach.always(t =&gt; {
+  t.context.sandbox.restore()
+})
+
+test(&apos;Throws if no stage is found&apos;, t =&gt; {
+  const sls = new Serverless()
+
+  t.throws(() =&gt; initServerlessPlugin(sls), /No stage found.*/)
+})
+
+test(&apos;Uses default values if no configuration&apos;, t =&gt; {
+  const sls = new Serverless()
+  sls.service.custom = {
+    defaults: {
+      stage: &apos;test&apos;
+    }
+  }
+
+  initServerlessPlugin(sls)
+  t.deepEqual(sls.service.deployVariables, {})
+  t.deepEqual(sls.service.deployEnvironment, {})
+})
+
+test(&apos;deployVariables are populated synchronously&apos;, t =&gt; {
+  const sls = new Serverless()
+
+  const expectedDeployVariables = {
+    a: 1,
+    b: { a: 2 },
+    c: [&apos;a&apos;, &apos;b&apos;, &apos;c&apos;]
+  }
+  sls.service.custom = {
+    defaults: {
+      stage: &apos;test&apos;
+    },
+    deploy: {
+      variables: {
+        test: expectedDeployVariables
+      }
+    }
+  }
+
+  initServerlessPlugin(sls)
+  t.deepEqual(sls.service.deployVariables, expectedDeployVariables)
+})
+
+test(&apos;deployVariables are populated by stage&apos;, t =&gt; {
+  const sls = new Serverless()
+
+  sls.service.custom = {
+    defaults: {
+      stage: &apos;test&apos;
+    },
+    deploy: {
+      variables: {
+        otherStage: {
+          a: 1,
+          b: { a: 2 },
+          c: [&apos;a&apos;, &apos;b&apos;, &apos;c&apos;]
+        }
+      }
+    }
+  }
+
+  initServerlessPlugin(sls)
+  t.deepEqual(sls.service.deployVariables, { })
+})
+
+test(&apos;deployEnvironments merges defaults&apos;, t =&gt; {
+  const sls = new Serverless()
+
+  const expectedDeployEnvironment = {
+    a: 1,
+    b: { a: 2 },
+    c: [&apos;a&apos;, &apos;b&apos;, &apos;c&apos;]
+  }
+
+  sls.service.custom = {
+    defaults: {
+      stage: &apos;test&apos;
+    },
+    deploy: {
+      environments: {
+        default: { a: 1 },
+        test: {
+          b: { a: 2 },
+          c: [&apos;a&apos;, &apos;b&apos;, &apos;c&apos;]
+        }
+      }
+    }
+  }
+
+  initServerlessPlugin(sls)
+  t.deepEqual(sls.service.deployEnvironment, expectedDeployEnvironment)
+})
+
+const CREDSTASH_CONFIG = {
+  defaults: {
+    stage: &apos;test&apos;
+  },
+  test: {
+    a: &apos;${credstash:testCredential}&apos;, // eslint-disable-line
+    other: &apos;${self:test.a}&apos; // eslint-disable-line
+  }
+}
+
+test(&apos;Credstash variables populate&apos;, async t =&gt; {
+  const sls = new Serverless()
+
+  sls.service.custom = _.cloneDeep(CREDSTASH_CONFIG)
+
+  const plugin = initServerlessPlugin(sls)
+  t.context.sandbox.stub(plugin.credstash, &apos;get&apos;).callsFake((name, cb) =&gt; {
+    cb(null, &apos;mySecret&apos;)
+  })
+  await sls.variables.populateService()
+  t.is(sls.service.custom.test.a, &apos;mySecret&apos;)
+})
+
+test(&apos;Throws if credstash errors&apos;, async t =&gt; {
+  const sls = new Serverless()
+
+  sls.service.custom = _.cloneDeep(CREDSTASH_CONFIG)
+
+  const plugin = initServerlessPlugin(sls)
+  t.context.sandbox.stub(plugin.credstash, &apos;get&apos;).callsFake((name, cb) =&gt; {
+    cb(new Error(&apos;This is my test error&apos;))
+  })
+  await t.throws(sls.variables.populateService(), /This is my test error/)
+})
+
+test(&apos;Skips credstash populate if requested&apos;, async t =&gt; {
+  const sls = new Serverless()
+
+  sls.service.custom = _.cloneDeep(CREDSTASH_CONFIG)
+
+  const plugin = initServerlessPlugin(sls)
+  plugin.options.credstash = &apos;false&apos;
+
+  await sls.variables.populateService()
+  t.is(sls.service.custom.test.a, &apos;credstash:testCredential&apos;) // eslint-disable-line
+})
+
+test(&apos;Throws if populating credstash and no region is specified&apos;, async t =&gt; {
+  const sls = new Serverless()
+
+  sls.service.custom = _.cloneDeep(CREDSTASH_CONFIG)
+  sls.service.provider.region = null
+
+  initServerlessPlugin(sls)
+  await t.throws(sls.variables.populateService(), /Cannot hydrate Credstash.*/)
+})
+
+test(&apos;Merges environment&apos;, async t =&gt; {
+  const sls = new Serverless()
+
+  sls.service.custom = {
+    defaults: {
+      stage: &apos;test&apos;
+    },
+    deploy: {
+      environments: {
+        default: { a: 1 },
+        test: {
+          b: &apos;foo&apos;
+        }
+      }
+    }
+  }
+
+  const plugin = initServerlessPlugin(sls)
+  await plugin._addDeployEnvironment()
+  t.deepEqual(sls.service.provider.environment, {
+    a: 1,
+    b: &apos;foo&apos;
+  })
+})
+
+test.serial(&apos;Runs command with correct environment&apos;, async t =&gt; {
+  const sls = new Serverless()
+
+  sls.service.custom = {
+    defaults: {
+      stage: &apos;test&apos;
+    },
+    deploy: {
+      environments: {
+        default: { a: 1 },
+        test: {
+          b: &apos;foo&apos;
+        }
+      }
+    }
+  }
+
+  const plugin = initServerlessPlugin(sls)
+  plugin.options.args = [&apos;args1&apos;, &apos;args2&apos;]
+  plugin.options.command = &apos;myCommand&apos;
+  const execSyncStub = t.context.sandbox.stub(childProcess, &apos;execSync&apos;).returns(&apos;MY OUTPUT&apos;)
+  await plugin._runWithEnvironment()
+  t.is(execSyncStub.args[0][0], &apos;myCommand args1,args2&apos;)
+  const env = execSyncStub.args[0][1].env
+  t.is(env.a, 1)
+  t.is(env.b, &apos;foo&apos;)
+})
+</code></pre>
+
+</div>
+
+<footer class="footer">
+  Generated by <a href="https://esdoc.org">ESDoc<span data-ice="esdocVersion">(0.5.2)</span><img src="./image/esdoc-logo-mini-black.png"></a>
+</footer>
+
+<script src="script/search_index.js"></script>
+<script src="script/search.js"></script>
+<script src="script/pretty-print.js"></script>
+<script src="script/inherited-summary.js"></script>
+<script src="script/test-summary.js"></script>
+<script src="script/inner-link.js"></script>
+<script src="script/patch-for-local.js"></script>
+</body>
+</html>
